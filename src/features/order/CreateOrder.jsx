@@ -1,0 +1,126 @@
+import { useState } from "react";
+import { Form, redirect, useActionData, useNavigation } from "react-router-dom";
+import { createOrder } from "../../services/apiRestaurant";
+import Button from "../../ui/Button";
+import { useDispatch, useSelector } from "react-redux";
+import { clearItem, getCart,  getTotalCartPrice } from "../cart/cartSlice";
+import EmptyCart from "../cart/EmptyCart";
+import store from '../../store'
+import { formatCurrency } from "../../utils/helpers";
+import { fetchAddress } from "../user/userSlice";
+
+
+// https://uibakery.io/regex-library/phone-number
+const isValidPhone = (str) =>
+  /^\+?\d{1,4}?[-.\s]?\(?\d{1,3}?\)?[-.\s]?\d{1,4}[-.\s]?\d{1,4}[-.\s]?\d{1,9}$/.test(
+    str
+  );
+
+
+
+function CreateOrder() {
+  const [withPriority, setWithPriority] = useState(false);
+  const cart = useSelector(getCart)
+  const TotalCartPrice = useSelector(getTotalCartPrice)
+  const priorityPrice = withPriority ? TotalCartPrice * 0.2 : 0 ;
+  const totalPrice = TotalCartPrice + priorityPrice
+
+
+  const navigation = useNavigation();
+  const isSubmitting = navigation.state === "submitting";
+  const formErrors = useActionData()
+
+   const {username , status: statusAddrees , address , position , error: addreesError} = useSelector(state => state.user)
+   const isLoadingAddrees =  statusAddrees === 'loading'
+
+   const dispatch = useDispatch()
+
+   if(!cart.length) return <EmptyCart />
+  return (
+    <div className="py-6 px-4">
+      <h2 className="text-sm font-semibold mb-4">Ready to order? Let's go!</h2>
+
+      
+
+      <Form method="POST">
+        <div className="mb-5 flex flex-col sm:flex-row sm:items-center">
+          <label className="sm:basis-40">Full Name</label>
+          <div className="grow">
+            <input className="input" type="text" name="customer" required defaultValue={username}  />
+          </div>
+        </div>
+
+        <div className="mb-5 flex flex-col sm:flex-row sm:items-center">
+          <label  className="sm:basis-40">Phone number</label>
+          <div className="grow">
+            <input className="input" type="tel" name="phone" required />
+          {formErrors?.phone && <p className="text-xs bg-red-100 text-red-700 p-2 mt-2 rounded-md ">{formErrors.phone}</p>}
+          </div>
+        </div>
+
+        <div className="mb-5 flex flex-col sm:flex-row sm:items-center">
+          <label  className="sm:basis-40">Address</label>
+          <div className="grow  mr-2">
+            <input 
+              type="text"
+              name="address" 
+              required  
+              disabled={isLoadingAddrees}
+              defaultValue={address}
+              className="input  "
+            />
+             {addreesError && <p className="text-xs bg-red-100 text-red-700 p-2 mt-2 rounded-md ">{addreesError}</p>}
+          </div>
+          {!position.latitude && !addreesError &&
+            <Button type='small' onClick={(e) => {
+              e.preventDefault()
+              dispatch(fetchAddress())}}
+              > get Address</Button>}
+        </div>
+
+        <div className="flex items-center justify-center">
+          <input
+          className="w-6 h-6 accent-yellow-400  focus:outline-none focus:ring focus:ring-yellow-400 focus:ring-offset-2 mr-2"
+            type="checkbox"
+            name="priority"
+            id="priority"
+            value={withPriority}
+            onChange={(e) => setWithPriority(e.target.checked)}
+          />
+          <label htmlFor="priority">Want to yo give your order priority?</label>
+        </div>
+
+        <div className="text-center mt-4"> 
+          <input type="hidden" name="cart" value={JSON.stringify(cart)}/>
+          <input type="hidden" name="position" value={position.latitude && position.longitude ? ` ${position.latitude} , ${position.longitude} ` :''}/>
+          <Button disabled={isSubmitting} type='primary' > {isSubmitting ? "Placing order..."  : `Order now for ${formatCurrency(totalPrice)}`}</Button>
+        </div>
+      </Form>
+    </div>
+  );
+}
+
+export async function action({request}){
+  const formData= await request.formData();
+  const data = Object.fromEntries(formData);
+  
+  const order ={
+    ...data ,
+    cart: JSON.parse(data.cart),
+    priority : data.priority === "true"
+  }
+
+  const errors = {};
+  if(!isValidPhone(order.phone))
+    errors.phone = "Invalid phone number" 
+
+  if(Object.keys(errors).length > 0) return errors
+
+  const newOrder = await createOrder(order)
+
+  store.dispatch(clearItem())
+
+  return redirect(`/order/${newOrder.id}`)
+}
+
+export default CreateOrder;
